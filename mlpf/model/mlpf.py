@@ -231,60 +231,41 @@ def ffn(input_dim, output_dim, width, act, dropout):
     )
 
 
-class RegressionOutput(nn.Module):
-    def __init__(self, mode, embed_dim, width, act, dropout, elemtypes):
-        super(RegressionOutput, self).__init__()
-        self.mode = mode
-        self.elemtypes = elemtypes
+class VoxelDensityHead(nn.Module):
+    def __init__(
+        self,
+        embed_dim,
+        num_voxels,
+        width,
+        act,
+        dropout=0.0,
+    ):
+        super().__init__()
 
-        # single output
-        if self.mode == "direct" or self.mode == "additive" or self.mode == "multiplicative":
-            self.nn = ffn(embed_dim, 1, width, act, dropout)
-        elif self.mode == "direct-elemtype":
-            self.nn = ffn(embed_dim, len(self.elemtypes), width, act, dropout)
-        elif self.mode == "direct-elemtype-split":
-            self.nn = nn.ModuleList()
-            for elem in range(len(self.elemtypes)):
-                self.nn.append(ffn(embed_dim, 1, width, act, dropout))
-        # two outputs
-        elif self.mode == "linear":
-            self.nn = ffn(embed_dim, 2, width, act, dropout)
-        elif self.mode == "linear-elemtype":
-            self.nn1 = ffn(embed_dim, len(self.elemtypes), width, act, dropout)
-            self.nn2 = ffn(embed_dim, len(self.elemtypes), width, act, dropout)
+        self.num_voxels = num_voxels
 
-    def forward(self, elems, x, orig_value):
-        if self.mode == "direct":
-            nn_out = self.nn(x)
-            return nn_out
-        elif self.mode == "direct-elemtype":
-            nn_out = self.nn(x)
-            elemtype_mask = torch.cat([elems[..., 0:1] == elemtype for elemtype in self.elemtypes], axis=-1)
-            nn_out = torch.sum(elemtype_mask * nn_out, axis=-1, keepdims=True)
-            return nn_out
-        elif self.mode == "direct-elemtype-split":
-            elem_outs = []
-            for elem in range(len(self.elemtypes)):
-                elem_outs.append(self.nn[elem](x))
-            elemtype_mask = torch.cat([elems[..., 0:1] == elemtype for elemtype in self.elemtypes], axis=-1)
-            elem_outs = torch.cat(elem_outs, axis=-1)
-            return torch.sum(elem_outs * elemtype_mask, axis=-1, keepdims=True)
-        elif self.mode == "additive":
-            nn_out = self.nn(x)
-            return orig_value + nn_out
-        elif self.mode == "multiplicative":
-            nn_out = self.nn(x)
-            return orig_value * nn_out
-        elif self.mode == "linear":
-            nn_out = self.nn(x)
-            return orig_value * nn_out[..., 0:1] + nn_out[..., 1:2]
-        elif self.mode == "linear-elemtype":
-            nn_out1 = self.nn1(x)
-            nn_out2 = self.nn2(x)
-            elemtype_mask = torch.cat([elems[..., 0:1] == elemtype for elemtype in self.elemtypes], axis=-1)
-            a = torch.sum(elemtype_mask * nn_out1, axis=-1, keepdims=True)
-            b = torch.sum(elemtype_mask * nn_out2, axis=-1, keepdims=True)
-            return orig_value * a + b
+        self.net = nn.Sequential(
+            nn.Linear(embed_dim, width),
+            act(),
+            nn.Dropout(dropout),
+            nn.Linear(width, width),
+            act(),
+            nn.Dropout(dropout),
+            nn.Linear(width, num_voxels),
+        )
+
+    def forward(self, embedding, mask=None):
+        """
+        embedding: (B, N_muons, embed_dim)
+        mask:      (B, N_muons) or None
+        """
+        out = self.net(embedding)  # (B, N_muons, num_voxels)
+
+        if mask is not None:
+            out = out * mask.unsqueeze(-1)
+
+        return out
+
 
 
 class MLPF(nn.Module):
@@ -300,11 +281,7 @@ class MLPF(nn.Module):
         layernorm=True,
         conv_type="attention",
         input_encoding="joint",
-        pt_mode="linear",
-        eta_mode="linear",
-        sin_phi_mode="linear",
-        cos_phi_mode="linear",
-        energy_mode="linear",
+        num_padded_voxels = 128,
         # element types which actually exist in the dataset
         elemtypes_nonzero=[1, 4, 5, 6, 8, 9, 10, 11],
         # should the conv layer outputs be concatted (concat) or take the last (last)
@@ -351,17 +328,8 @@ class MLPF(nn.Module):
             embedding_dim = num_heads * head_dim
             width = num_heads * head_dim
 
-        # embedding of the inputs
-        if self.input_encoding == "joint":
-            self.nn0_id = ffn(self.input_dim, embedding_dim, width, self.act, dropout_ff)
-            self.nn0_reg = ffn(self.input_dim, embedding_dim, width, self.act, dropout_ff)
-        elif self.input_encoding == "split":
-            self.nn0_id = nn.ModuleList()
-            for ielem in range(len(self.elemtypes_nonzero)):
-                self.nn0_id.append(ffn(self.input_dim, embedding_dim, width, self.act, dropout_ff))
-            self.nn0_reg = nn.ModuleList()
-            for ielem in range(len(self.elemtypes_nonzero)):
-                self.nn0_reg.append(ffn(self.input_dim, embedding_dim, width, self.act, dropout_ff))
+        self.nn0 = ffn(self.input_dim, embedding_dim, width, self.act, dropout_ff)
+
         if self.num_convs != 0:
             if self.conv_type == "attention":
                 self.conv_id = nn.ModuleList()
@@ -404,8 +372,7 @@ class MLPF(nn.Module):
                         )
                     )
             elif self.conv_type == "gnn_lsh":
-                self.conv_id = nn.ModuleList()
-                self.conv_reg = nn.ModuleList()
+                self.conv = nn.ModuleList()
                 for i in range(self.num_convs):
                     gnn_conf = {
                         "inout_dim": embedding_dim,
@@ -418,26 +385,22 @@ class MLPF(nn.Module):
                         "ffn_dist_hidden_dim": ffn_dist_hidden_dim,
                         "ffn_dist_num_layers": ffn_dist_num_layers,
                     }
-                    self.conv_id.append(CombinedGraphLayer(**gnn_conf))
-                    self.conv_reg.append(CombinedGraphLayer(**gnn_conf))
+                    self.conv.append(CombinedGraphLayer(**gnn_conf))
 
         if self.learned_representation_mode == "concat":
             decoding_dim = self.num_convs * embedding_dim
         elif self.learned_representation_mode == "last":
             decoding_dim = embedding_dim
 
-        # DNN that acts on the node level to predict the PID
-        self.nn_binary_particle = ffn(decoding_dim, 2, width, self.act, dropout_ff)
-        self.nn_pid = ffn(decoding_dim, num_classes, width, self.act, dropout_ff)
-        # self.nn_pu = ffn(decoding_dim, 2, width, self.act, dropout_ff)
-
         # elementwise DNN for node momentum regression
         embed_dim = decoding_dim
-        self.nn_pt = RegressionOutput(pt_mode, embed_dim, width, self.act, dropout_ff, self.elemtypes_nonzero)
-        self.nn_eta = RegressionOutput(eta_mode, embed_dim, width, self.act, dropout_ff, self.elemtypes_nonzero)
-        self.nn_sin_phi = RegressionOutput(sin_phi_mode, embed_dim, width, self.act, dropout_ff, self.elemtypes_nonzero)
-        self.nn_cos_phi = RegressionOutput(cos_phi_mode, embed_dim, width, self.act, dropout_ff, self.elemtypes_nonzero)
-        self.nn_energy = RegressionOutput(energy_mode, embed_dim, width, self.act, dropout_ff, self.elemtypes_nonzero)
+        self.nn_voxel_density = VoxelDensityHead(
+            embed_dim=decoding_dim,
+            num_voxels=num_padded_voxels,
+            width=width,
+            act=self.act,
+            dropout=dropout_ff,
+        )
 
         if self.use_pre_layernorm:  # add final norm after last attention block as per https://arxiv.org/abs/2002.04745
             self.final_norm_id = torch.nn.LayerNorm(decoding_dim)
@@ -445,77 +408,57 @@ class MLPF(nn.Module):
 
     # @torch.compile
     def forward(self, X_features, mask):
+        """
+        Args:
+            X_features : (B, M, input_dim) input features per muon
+            mask       : (B, M)          valid muons
+        Returns:
+            preds_voxel_density : (B, M, N) predicted densities along each muon
+        """
+
         Xfeat_normed = X_features
+        embeddings = []
 
-        embeddings_id, embeddings_reg = [], []
+        # ----- Input embedding -----
         if self.input_encoding == "joint":
-            embedding_id = self.nn0_id(Xfeat_normed)
-            embedding_reg = self.nn0_reg(Xfeat_normed)
+            embedding = self.nn0(Xfeat_normed)  # single embedding for all muons
+
         elif self.input_encoding == "split":
-            embedding_id = torch.stack([nn0(Xfeat_normed) for nn0 in self.nn0_id], axis=-1)
-            elemtype_mask = torch.cat([X_features[..., 0:1] == elemtype for elemtype in self.elemtypes_nonzero], axis=-1)
-            embedding_id = torch.sum(embedding_id * elemtype_mask.unsqueeze(-2), axis=-1)
+            # Element-type-specific embeddings
+            # Shape: (B, M, embed_dim, n_elemtypes)
+            embedding = torch.stack([nn0(Xfeat_normed) for nn0 in self.nn0], dim=-1)
 
-            embedding_reg = torch.stack([nn0(Xfeat_normed) for nn0 in self.nn0_reg], axis=-1)
-            elemtype_mask = torch.cat([X_features[..., 0:1] == elemtype for elemtype in self.elemtypes_nonzero], axis=-1)
-            embedding_reg = torch.sum(embedding_reg * elemtype_mask.unsqueeze(-2), axis=-1)
-        if self.num_convs != 0:
-            for num, conv in enumerate(self.conv_id):
-                conv_input = embedding_id if num == 0 else embeddings_id[-1]
-                out_padded = conv(conv_input, mask, embedding_id)
-                embeddings_id.append(out_padded)
-            for num, conv in enumerate(self.conv_reg):
-                conv_input = embedding_reg if num == 0 else embeddings_reg[-1]
-                out_padded = conv(conv_input, mask, embedding_reg)
-                embeddings_reg.append(out_padded)
+            # Shape: (B, M, n_elemtypes)
+            elemtype_mask = torch.cat(
+                [X_features[..., 0:1] == elemtype for elemtype in self.elemtypes_nonzero],
+                dim=-1,
+            )
+
+            # Select correct element-type embedding
+            embedding = torch.sum(embedding * elemtype_mask.unsqueeze(-2), dim=-1)
+
+        # ----- Convolution / attention layers -----
+        if self.num_convs > 0:
+            for i, conv in enumerate(self.conv):
+                conv_input = embedding if i == 0 else embeddings[-1]
+                out = conv(conv_input, mask, embedding)
+                embeddings.append(out)
         else:
-            embeddings_id.append(embedding_id)
-            embeddings_reg.append(embedding_reg)
+            embeddings.append(embedding)
 
-        # id input
+        # ----- Aggregate learned representation -----
         if self.learned_representation_mode == "concat":
-            final_embedding_id = torch.cat(embeddings_id, axis=-1)
+            final_embedding = torch.cat(embeddings, dim=-1)
         elif self.learned_representation_mode == "last":
-            final_embedding_id = torch.cat([embeddings_id[-1]], axis=-1)
+            final_embedding = embeddings[-1]
 
         if self.use_pre_layernorm:
-            final_embedding_id = self.final_norm_id(final_embedding_id)
+            final_embedding = self.final_norm_reg(final_embedding)
 
-        preds_binary_particle = self.nn_binary_particle(final_embedding_id)
-        preds_pid = self.nn_pid(final_embedding_id)
-        # preds_pu = self.nn_pu(final_embedding_id)
-        preds_pu = torch.zeros_like(preds_binary_particle)
+        # ----- Voxel-density prediction -----
+        preds_voxel_density = self.nn_voxel_density(final_embedding)
 
-        # pred_charge = self.nn_charge(final_embedding_id)
-
-        # regression input
-        if self.learned_representation_mode == "concat":
-            final_embedding_reg = torch.cat(embeddings_reg, axis=-1)
-        elif self.learned_representation_mode == "last":
-            final_embedding_reg = torch.cat([embeddings_reg[-1]], axis=-1)
-
-        if self.use_pre_layernorm:
-            final_embedding_reg = self.final_norm_reg(final_embedding_reg)
-
-        # The PFElement feature order in X_features defined in fcc/postprocessing.py
-        preds_pt = self.nn_pt(X_features, final_embedding_reg, X_features[..., 1:2])
-        preds_eta = self.nn_eta(X_features, final_embedding_reg, X_features[..., 2:3])
-        preds_sin_phi = self.nn_sin_phi(X_features, final_embedding_reg, X_features[..., 3:4])
-        preds_cos_phi = self.nn_cos_phi(X_features, final_embedding_reg, X_features[..., 4:5])
-
-        # ensure created particle has positive mass^2 by computing energy from pt and adding a positive-only correction
-        pt_real = torch.exp(preds_pt.detach()) * X_features[..., 1:2]
-        # sinh does not exist on opset13, required for CMSSW_12_3_0_pre6
-        # pz_real = pt_real * torch.sinh(preds_eta.detach())
-        pz_real = pt_real * (torch.exp(preds_eta.detach()) - torch.exp(-preds_eta.detach())) / 2.0
-        e_real = torch.log(torch.sqrt(pt_real**2 + pz_real**2) / X_features[..., 5:6])
-        if mask is not None:
-            e_real = e_real * mask.unsqueeze(-1)
-        e_real[torch.isinf(e_real)] = 0
-        e_real[torch.isnan(e_real)] = 0
-        preds_energy = e_real + torch.nn.functional.relu(self.nn_energy(X_features, final_embedding_reg, X_features[..., 5:6]))
-        preds_momentum = torch.cat([preds_pt, preds_eta, preds_sin_phi, preds_cos_phi, preds_energy], axis=-1)
-        return preds_binary_particle, preds_pid, preds_momentum, preds_pu
+        return preds_voxel_density
 
 
 def configure_model_trainable(model: MLPF, trainable: Union[str, List[str]], is_training: bool):
