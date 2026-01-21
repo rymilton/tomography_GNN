@@ -23,129 +23,40 @@ def sliced_wasserstein_loss(y_pred, y_true, num_projections=200):
     return ret
 
 
-def mlpf_loss(y, ypred, batch):
+def mlpf_loss(
+    y,
+    ypred,
+    muon_mask=None,
+    voxel_mask=None
+):
     """
-    Args
-        y [dict]: relevant keys are "cls_id, momentum, charge"
-        ypred [dict]: relevant keys are "cls_id_onehot, momentum, charge"
-        batch [PFBatch]: the MLPF inputs
+    Args:
+        y            : True voxel densities for each muon in batch (B, M, N)
+        ypred        : Predicted voxel densities for each muon in batch (B, M, N)
+        muon_mask    : (B, M) valid muons
+        voxel_mask   : (B, M, N) valid voxel intersections
     """
-    loss = {}
-    loss_obj_id = FocalLoss(gamma=2.0, reduction="none")
 
-    # msk_pred_particle = torch.unsqueeze((ypred["cls_id"] != 0).to(dtype=torch.float32), dim=-1)
-    msk_true_particle = torch.unsqueeze((y["cls_id"] != 0).to(dtype=torch.float32), dim=-1)
-    nelem = torch.sum(batch.mask)
-    npart = torch.sum(y["cls_id"] != 0)
+    pred = ypred
+    target = y
 
-    ypred["momentum"] = ypred["momentum"] * msk_true_particle
-    y["momentum"] = y["momentum"] * msk_true_particle
+    # Combined mask: valid muon AND valid voxel
+    full_mask = voxel_mask * muon_mask.unsqueeze(-1)
 
-    # in case of the 3D-padded mode, pytorch expects (batch, num_classes, ...)
-    ypred["cls_binary"] = ypred["cls_binary"].permute((0, 2, 1))
-    ypred["cls_id_onehot"] = ypred["cls_id_onehot"].permute((0, 2, 1))
-    # ypred["ispu"] = ypred["ispu"].permute((0, 2, 1))
+    # Squared error
+    loss = (pred - target) ** 2
+    loss = loss * full_mask
 
-    # binary loss for particle / no-particle classification
-    # loss_binary_classification = 10.0 * loss_obj_id(ypred["cls_binary"], (y["cls_id"] != 0).long()).reshape(y["cls_id"].shape)
-    loss_binary_classification = 10.0 * torch.nn.functional.cross_entropy(ypred["cls_binary"], (y["cls_id"] != 0).long(), reduction="none")
+    # Normalize by number of valid entries
+    denom = full_mask.sum().clamp(min=1.0)
+    loss_opt = loss.sum() / denom
 
-    # compare the particle type, only for cases where there was a true particle
-    loss_pid_classification = loss_obj_id(ypred["cls_id_onehot"], y["cls_id"]).reshape(y["cls_id"].shape)
-    loss_pid_classification[y["cls_id"] == 0] *= 0
+    loss_dict = {
+        "Total": loss_opt.detach(),
+    }
 
-    # compare particle "PU-ness", only for cases where there was a true particle
-    # loss_pu = torch.nn.functional.cross_entropy(ypred["ispu"], y["ispu"].long(), reduction="none")
-    # loss_pu = loss_obj_id(ypred["ispu"], y["ispu"].long()).reshape(y["cls_id"].shape)
-    # loss_pu[y["cls_id"] == 0] *= 0
+    return loss_opt, loss_dict
 
-    # do not compute PU loss if no PU samples in this batch
-    # if y["ispu"].long().sum() == 0:
-    #     loss_pu *= 0
-
-    # compare particle momentum, only for cases where there was a true particle
-    loss_regression_pt = torch.nn.functional.mse_loss(ypred["pt"], y["pt"], reduction="none")
-    loss_regression_eta = 1e-2 * torch.nn.functional.mse_loss(ypred["eta"], y["eta"], reduction="none")
-    loss_regression_sin_phi = 1e-2 * torch.nn.functional.mse_loss(ypred["sin_phi"], y["sin_phi"], reduction="none")
-    loss_regression_cos_phi = 1e-2 * torch.nn.functional.mse_loss(ypred["cos_phi"], y["cos_phi"], reduction="none")
-    loss_regression_energy = torch.nn.functional.mse_loss(ypred["energy"], y["energy"], reduction="none")
-
-    loss_regression_pt[y["cls_id"] == 0] *= 0
-    loss_regression_eta[y["cls_id"] == 0] *= 0
-    loss_regression_sin_phi[y["cls_id"] == 0] *= 0
-    loss_regression_cos_phi[y["cls_id"] == 0] *= 0
-    loss_regression_energy[y["cls_id"] == 0] *= 0
-
-    # set the loss to 0 on padded elements in the batch
-    loss_binary_classification[batch.mask == 0] *= 0
-    loss_pid_classification[batch.mask == 0] *= 0
-    # loss_pu[batch.mask == 0] *= 0
-    loss_regression_pt[batch.mask == 0] *= 0
-    loss_regression_eta[batch.mask == 0] *= 0
-    loss_regression_sin_phi[batch.mask == 0] *= 0
-    loss_regression_cos_phi[batch.mask == 0] *= 0
-    loss_regression_energy[batch.mask == 0] *= 0
-
-    # add weight based on target pt
-    sqrt_target_pt = torch.sqrt(torch.exp(y["pt"]) * batch.X[:, :, 1])
-    loss_regression_pt *= sqrt_target_pt
-    loss_regression_energy *= sqrt_target_pt
-
-    # average over all target particles
-    loss["Regression_pt"] = loss_regression_pt.sum() / npart
-    loss["Regression_eta"] = loss_regression_eta.sum() / npart
-    loss["Regression_sin_phi"] = loss_regression_sin_phi.sum() / npart
-    loss["Regression_cos_phi"] = loss_regression_cos_phi.sum() / npart
-    loss["Regression_energy"] = loss_regression_energy.sum() / npart
-
-    # average over all elements that were not padded
-    loss["Classification_binary"] = loss_binary_classification.sum() / nelem
-    loss["Classification"] = loss_pid_classification.sum() / nelem
-    # loss["ispu"] = loss_pu.sum() / nelem
-
-    # compute predicted pt from model output
-    # pred_pt = torch.unsqueeze(torch.exp(ypred["pt"]) * batch.X[..., 1], dim=-1) * msk_pred_particle
-    # pred_px = pred_pt * torch.unsqueeze(ypred["cos_phi"].detach(), dim=-1) * msk_pred_particle
-    # pred_py = pred_pt * torch.unsqueeze(ypred["sin_phi"].detach(), dim=-1) * msk_pred_particle
-
-    # compute MET, sum across particle axis in event
-    # pred_met = torch.sqrt(torch.sum(pred_px, dim=-2) ** 2 + torch.sum(pred_py, dim=-2) ** 2).detach()
-    # loss["MET"] = torch.nn.functional.huber_loss(pred_met.squeeze(dim=-1), batch.genmet).mean()
-
-    # was_input_pred = torch.concat([torch.softmax(ypred["cls_binary"].transpose(1, 2), dim=-1), ypred["momentum"]], dim=-1) * batch.mask.unsqueeze(
-    #     dim=-1
-    # )
-    # was_input_true = torch.concat([torch.nn.functional.one_hot((y["cls_id"] != 0).to(torch.long)), y["momentum"]], dim=-1) * batch.mask.unsqueeze(
-    #     dim=-1
-    # )
-
-    # standardize Wasserstein loss
-    # std = was_input_true[batch.mask].std(dim=0)
-    # loss["Sliced_Wasserstein_Loss"] = sliced_wasserstein_loss(was_input_pred / std, was_input_true / std).mean()
-
-    # this is the final loss to be optimized
-    loss["Total"] = (
-        loss["Classification_binary"]
-        + loss["Classification"]
-        # + loss["ispu"]
-        + loss["Regression_pt"]
-        + loss["Regression_eta"]
-        + loss["Regression_sin_phi"]
-        + loss["Regression_cos_phi"]
-        + loss["Regression_energy"]
-    )
-    loss_opt = loss["Total"]
-    if torch.isnan(loss_opt):
-        _logger.error(ypred)
-        _logger.error(sqrt_target_pt)
-        _logger.error(loss)
-        raise Exception("Loss became NaN")
-
-    # store these separately but detached
-    for k in loss.keys():
-        loss[k] = loss[k].detach()
-
-    return loss_opt, loss
 
 
 # from https://github.com/AdeelH/pytorch-multi-class-focal-loss/blob/master/focal_loss.py

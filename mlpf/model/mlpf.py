@@ -231,6 +231,7 @@ def ffn(input_dim, output_dim, width, act, dropout):
     )
 
 
+# The head to predict voxel densities for each muon. Output will be padded to the max number of voxels.
 class VoxelDensityHead(nn.Module):
     def __init__(
         self,
@@ -254,15 +255,16 @@ class VoxelDensityHead(nn.Module):
             nn.Linear(width, num_voxels),
         )
 
-    def forward(self, embedding, mask=None):
+    def forward(self, embedding, muon_mask=None):
         """
         embedding: (B, N_muons, embed_dim)
-        mask:      (B, N_muons) or None
+        muon_mask:      (B, N_muons) or None
         """
         out = self.net(embedding)  # (B, N_muons, num_voxels)
 
-        if mask is not None:
-            out = out * mask.unsqueeze(-1)
+        # Removing padded muons 
+        if muon_mask is not None:
+            out = out * muon_mask.unsqueeze(-1)
 
         return out
 
