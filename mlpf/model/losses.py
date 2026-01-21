@@ -23,39 +23,19 @@ def sliced_wasserstein_loss(y_pred, y_true, num_projections=200):
     return ret
 
 
-def mlpf_loss(
-    y,
-    ypred,
-    muon_mask=None,
-    voxel_mask=None
-):
+def mlpf_loss(pred, target, voxel_mask_event=None):
     """
-    Args:
-        y            : True voxel densities for each muon in batch (B, M, N)
-        ypred        : Predicted voxel densities for each muon in batch (B, M, N)
-        muon_mask    : (B, M) valid muons
-        voxel_mask   : (B, M, N) valid voxel intersections
+    pred   : (B, N) aggregated voxel density
+    target : (B, N) true voxel density
     """
 
-    pred = ypred
-    target = y
-
-    # Combined mask: valid muon AND valid voxel
-    full_mask = voxel_mask * muon_mask.unsqueeze(-1)
-
-    # Squared error
     loss = (pred - target) ** 2
-    loss = loss * full_mask
 
-    # Normalize by number of valid entries
-    denom = full_mask.sum().clamp(min=1.0)
-    loss_opt = loss.sum() / denom
+    if voxel_mask_event is not None:
+        loss = loss * voxel_mask_event
 
-    loss_dict = {
-        "Total": loss_opt.detach(),
-    }
-
-    return loss_opt, loss_dict
+    denom = loss.numel() if voxel_mask_event is None else voxel_mask_event.sum().clamp(min=1.0)
+    return loss.sum() / denom
 
 
 

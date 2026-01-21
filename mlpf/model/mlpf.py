@@ -255,16 +255,21 @@ class VoxelDensityHead(nn.Module):
             nn.Linear(width, num_voxels),
         )
 
-    def forward(self, embedding, muon_mask=None):
+    def forward(self, embedding, muon_mask=None, voxel_mask=None):
         """
-        embedding: (B, N_muons, embed_dim)
-        muon_mask:      (B, N_muons) or None
+        embedding:  (B, N_muons, embed_dim)
+        muon_mask:  (B, N_muons)   -> zeros padded muons
+        voxel_mask: (B, N_muons, N_voxels) -> zeros voxels not intersected by this muon
         """
         out = self.net(embedding)  # (B, N_muons, num_voxels)
 
-        # Removing padded muons 
+        # Remove padded muons
         if muon_mask is not None:
             out = out * muon_mask.unsqueeze(-1)
+
+        # Zero out voxels this muon doesn't pass through
+        if voxel_mask is not None:
+            out = out * voxel_mask
 
         return out
 
@@ -283,7 +288,7 @@ class MLPF(nn.Module):
         layernorm=True,
         conv_type="attention",
         input_encoding="joint",
-        num_padded_voxels = 128,
+        max_num_voxels = 128,
         # element types which actually exist in the dataset
         elemtypes_nonzero=[1, 4, 5, 6, 8, 9, 10, 11],
         # should the conv layer outputs be concatted (concat) or take the last (last)
@@ -398,7 +403,7 @@ class MLPF(nn.Module):
         embed_dim = decoding_dim
         self.nn_voxel_density = VoxelDensityHead(
             embed_dim=decoding_dim,
-            num_voxels=num_padded_voxels,
+            num_voxels=max_num_voxels,
             width=width,
             act=self.act,
             dropout=dropout_ff,
@@ -409,11 +414,12 @@ class MLPF(nn.Module):
             self.final_norm_reg = torch.nn.LayerNorm(embed_dim)
 
     # @torch.compile
-    def forward(self, X_features, mask):
+    def forward(self, X_features, muon_mask, voxel_mask=None, path_length=None):
         """
         Args:
             X_features : (B, M, input_dim) input features per muon
-            mask       : (B, M)          valid muons
+            muon_mask  : (B, M)          valid muons
+            voxel_mask : (B, M, N)       valid voxel intersections
         Returns:
             preds_voxel_density : (B, M, N) predicted densities along each muon
         """
@@ -443,7 +449,7 @@ class MLPF(nn.Module):
         if self.num_convs > 0:
             for i, conv in enumerate(self.conv):
                 conv_input = embedding if i == 0 else embeddings[-1]
-                out = conv(conv_input, mask, embedding)
+                out = conv(conv_input, muon_mask, embedding)
                 embeddings.append(out)
         else:
             embeddings.append(embedding)
@@ -457,10 +463,18 @@ class MLPF(nn.Module):
         if self.use_pre_layernorm:
             final_embedding = self.final_norm_reg(final_embedding)
 
-        # ----- Voxel-density prediction -----
-        preds_voxel_density = self.nn_voxel_density(final_embedding)
+        # ----- Voxel-density prediction (per muon, latent) -----
+        density_per_muon = self.nn_voxel_density(final_embedding, muon_mask, voxel_mask)
+        # rho_mu: (B, M, N)
 
-        return preds_voxel_density
+        # ----- Apply voxel geometry -----
+        if voxel_mask is not None:
+            density_per_muon = density_per_muon * voxel_mask
+        if path_length is not None:
+            density_per_muon = density_per_muon * path_length
+
+        density_total = density_per_muon.sum(dim=1)  # (B, N)
+        return density_total
 
 
 def configure_model_trainable(model: MLPF, trainable: Union[str, List[str]], is_training: bool):
