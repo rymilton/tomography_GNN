@@ -120,6 +120,8 @@ def main():
         detector_data = pickle.load(f)
 
     df = pd.DataFrame(detector_data)
+    df = df.query('theta_reco != 90').copy()
+    
     for index, row in df.iterrows():
         detector_id = int(row['detector'])
         
@@ -156,8 +158,10 @@ def main():
         # Save the resulting global coordinates and angles back to the dataframe
         df.at[index, 'x_global_above'] = x_global_above
         df.at[index, 'y_global_above'] = y_global_above
+        df.at[index, 'z_global_above'] = desired_z_location_above
         df.at[index, 'x_global_below'] = x_global_below
         df.at[index, 'y_global_below'] = y_global_below
+        df.at[index, 'z_global_below'] = desired_z_location_below
         df.at[index, 'theta_global'] = np.rad2deg(theta_global)
         df.at[index, 'phi_global'] = np.rad2deg(phi_global)
 
