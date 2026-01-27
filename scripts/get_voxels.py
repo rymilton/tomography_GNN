@@ -37,9 +37,9 @@ def parse_arguments():
     )
     parser.add_argument(
         "--draw_plots",
+        action="store_true",
         default=False,
         help="Whether to draw plots of the muon rays and voxel intersections",
-        type=bool,
     )
     parser.add_argument(
         "--output_file",
@@ -141,9 +141,8 @@ def main():
         muons_final, muons_initial, vol, vol_start=voxel_start_pos, vol_spacing=voxel_spacing
     )
     print(f"Siddon raytrace time for {len(muons_initial)} muons: %.3f seconds" % (time.time() - siddon_start_time))
-    print(muons)
 
-    output_muons = muons[:max_num_muons].copy()
+    output_muons = muons[:max_num_muons].copy().reset_index(drop=True)
 
     output_muons['voxels_hit'] = pd.Series(all_muon_voxels)
     output_muons['lengths_in_voxels'] = pd.Series(all_muon_lengths_in_voxels)
