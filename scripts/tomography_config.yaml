@@ -1,0 +1,16 @@
+MUON_FEATURES:
+  - theta_reco
+  - phi_reco
+  - x_global_above
+  - y_global_above
+  - z_global_above
+  - x_global_below
+  - y_global_below
+  - z_global_below
+NUM_EPOCHS: 100
+LEARNING_RATE: 1e-3
+NUM_MUON_GROUPS_PER_BATCH: 64
+NUM_MUONS_PER_GROUP: 64
+VALIDATION_SPLIT: 0.2
+MODEL_SAVE_DIRECTORY: "/home/ryan/tomography_GNN/tomography_models/"
+MODEL_NAME: "tomography_MLPF"
