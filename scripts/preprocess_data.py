@@ -3,6 +3,7 @@ import argparse
 import pickle
 import time
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 
 def parse_arguments():
@@ -21,11 +22,24 @@ def parse_arguments():
         type=str,
     )
     parser.add_argument(
-        "--output_file",
-        default="/home/ryan/tomography_GNN/preprocessed_data.pkl",
-        help="Output pickle file to save preprocessed data to",
+        "--output_train_file",
+        default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
+        help="Output pickle file to save preprocessed training data to",
         type=str,
     )
+    parser.add_argument(
+        "--output_test_file",
+        default="/home/ryan/tomography_GNN/preprocessed_data_test.pkl",
+        help="Output pickle file to save preprocessed test data to",
+        type=str,
+    )
+    parser.add_argument(
+        "--test_fraction",
+        default=.25,
+        help="Fraction of data to make into test data",
+        type=float,
+    )
+
     return parser.parse_args()
 
 
@@ -75,10 +89,13 @@ def main():
             }
         )
     output_df = pd.DataFrame(rows)
+    train_df, test_df = train_test_split(output_df, test_size=flags.test_fraction)
 
     # Save the output dataframe to a pickle file, as well as the flattened voxel densities. Just want a single copy of the voxel densities, so we make a file with the dataframe and the voxel densities array
-    with open(flags.output_file, "wb") as f:
-        pickle.dump({"dataframe": output_df, "voxel_densities": flattened_densities}, f)
+    with open(flags.output_train_file, "wb") as f:
+        pickle.dump({"dataframe": train_df, "voxel_densities": flattened_densities}, f)
+    with open(flags.output_test_file, "wb") as f:
+        pickle.dump({"dataframe": test_df, "voxel_densities": flattened_densities}, f)
 
 
 if __name__ == "__main__":

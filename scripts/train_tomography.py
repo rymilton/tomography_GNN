@@ -112,14 +112,8 @@ def parse_arguments():
 
     parser.add_argument(
         "--input_data_file",
-        default="/home/ryan/tomography_GNN/preprocessed_data.pkl",
+        default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
         help="Input pickle file with with reconstructed theta, phi angles, and the voxel interesections",
-        type=str,
-    )
-    parser.add_argument(
-        "--output_file",
-        default="/home/ryan/tomography_GNN/preprocessed_data.pkl",
-        help="Output pickle file to save preprocessed data to",
         type=str,
     )
     parser.add_argument(
@@ -153,6 +147,7 @@ def main():
     # Open input data file
     with open(flags.input_data_file, "rb") as f:
         data = pickle.load(f)
+    print(f"Have {len(data['dataframe'])} number of events!")
 
     max_num_muons = (
         flags.num_muons if flags.num_muons is not None else len(data["dataframe"])
