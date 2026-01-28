@@ -8,9 +8,10 @@ from raytrace.raytracers import raytrace
 import time
 import pandas as pd
 
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument(
         "--input_voxel_file",
         default="/home/ryan/tomography_GNN/soil_target_voxels.pkl",
@@ -49,6 +50,7 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+
 def draw_voxel_cube(ax, idx, start, spacing, color="gray", alpha=0.1, lw=0.5):
     idx = np.array(idx)
     start = np.array(start)
@@ -69,12 +71,10 @@ def draw_voxel_cube(ax, idx, start, spacing, color="gray", alpha=0.1, lw=0.5):
         [(x[0], y[1], z[0]), (x[1], y[1], z[0])],
         [(x[0], y[0], z[1]), (x[1], y[0], z[1])],
         [(x[0], y[1], z[1]), (x[1], y[1], z[1])],
-
         [(x[0], y[0], z[0]), (x[0], y[1], z[0])],
         [(x[1], y[0], z[0]), (x[1], y[1], z[0])],
         [(x[0], y[0], z[1]), (x[0], y[1], z[1])],
         [(x[1], y[0], z[1]), (x[1], y[1], z[1])],
-
         [(x[0], y[0], z[0]), (x[0], y[0], z[1])],
         [(x[1], y[0], z[0]), (x[1], y[0], z[1])],
         [(x[0], y[1], z[0]), (x[0], y[1], z[1])],
@@ -84,13 +84,10 @@ def draw_voxel_cube(ax, idx, start, spacing, color="gray", alpha=0.1, lw=0.5):
     # collect artist handles so we can remove them later
     artists = []
     for (x1, y1, z1), (x2, y2, z2) in edges:
-        ln, = ax.plot([x1, x2], [y1, y2], [z1, z2],
-                      color=color, alpha=alpha, lw=lw)
+        (ln,) = ax.plot([x1, x2], [y1, y2], [z1, z2], color=color, alpha=alpha, lw=lw)
         artists.append(ln)
 
     return artists
-
-
 
 
 def main():
@@ -100,8 +97,7 @@ def main():
         vol = pickle.load(f)
     with open(flags.input_voxel_positions_file, "rb") as f:
         voxel_positions = pickle.load(f)
-    voxel_positions = np.array(voxel_positions)/1000 # convert from mm to m
-
+    voxel_positions = np.array(voxel_positions) / 1000  # convert from mm to m
 
     voxel_start_pos = voxel_positions[0, 0, 0]
     dz = voxel_positions[0, 0, 1, 2] - voxel_positions[0, 0, 0, 2]
@@ -110,12 +106,11 @@ def main():
     voxel_spacing = np.array([dx, dy, dz])
     print("Voxel start position (x, y, z) in meters:", voxel_start_pos)
     print("Voxel spacing (x, y, z) in meters:", voxel_spacing)
-    
 
     with open(flags.input_muon_file, "rb") as f:
         muons = pickle.load(f)
 
-    muon_detectors = muons['detector'].to_numpy()
+    muon_detectors = muons["detector"].to_numpy()
     detector_locations = [
         [0, 0, 0.5],
         [-5, -5, 0.5],
@@ -123,29 +118,40 @@ def main():
     ]
     max_num_muons = len(muons) if flags.num_muons is None else flags.num_muons
     print(f"Processing {max_num_muons} muons...")
-    muons_initial = np.column_stack([
-        muons['x_global_above'].to_numpy(),
-        muons['y_global_above'].to_numpy(),
-        muons['z_global_above'].to_numpy()
-    ])[:max_num_muons]
-    muons_final = np.column_stack([
-        muons['x_global_below'].to_numpy(),
-        muons['y_global_below'].to_numpy(),
-        muons['z_global_below'].to_numpy()
-    ])[:max_num_muons]
+    muons_initial = np.column_stack(
+        [
+            muons["x_global_above"].to_numpy(),
+            muons["y_global_above"].to_numpy(),
+            muons["z_global_above"].to_numpy(),
+        ]
+    )[:max_num_muons]
+    muons_final = np.column_stack(
+        [
+            muons["x_global_below"].to_numpy(),
+            muons["y_global_below"].to_numpy(),
+            muons["z_global_below"].to_numpy(),
+        ]
+    )[:max_num_muons]
 
     # run raytrace
     # For each muon, we get the voxel indices it passes through and the lengths in each voxel
     siddon_start_time = time.time()
     all_muon_voxels, all_muon_lengths_in_voxels = raytrace(
-        muons_final, muons_initial, vol, vol_start=voxel_start_pos, vol_spacing=voxel_spacing
+        muons_final,
+        muons_initial,
+        vol,
+        vol_start=voxel_start_pos,
+        vol_spacing=voxel_spacing,
     )
-    print(f"Siddon raytrace time for {len(muons_initial)} muons: %.3f seconds" % (time.time() - siddon_start_time))
+    print(
+        f"Siddon raytrace time for {len(muons_initial)} muons: %.3f seconds"
+        % (time.time() - siddon_start_time)
+    )
 
     output_muons = muons[:max_num_muons].copy().reset_index(drop=True)
 
-    output_muons['voxels_hit'] = pd.Series(all_muon_voxels)
-    output_muons['lengths_in_voxels'] = pd.Series(all_muon_lengths_in_voxels)
+    output_muons["voxels_hit"] = pd.Series(all_muon_voxels)
+    output_muons["lengths_in_voxels"] = pd.Series(all_muon_lengths_in_voxels)
 
     # --- Save updated muons DataFrame ---
     output_file = flags.output_file
@@ -154,8 +160,6 @@ def main():
 
     print(f"Saved muon DataFrame with voxel info to {output_file}")
 
-
-    
     if flags.draw_plots:
         fig = plt.figure(figsize=(9, 9))
         ax = fig.add_subplot(111, projection="3d")
@@ -168,13 +172,7 @@ def main():
             for j in range(ny):
                 for i in range(nx):
                     draw_voxel_cube(
-                        ax,
-                        (i, j, k),
-                        start,
-                        spacing,
-                        color="gray",
-                        alpha=0.25,
-                        lw=0.4
+                        ax, (i, j, k), start, spacing, color="gray", alpha=0.25, lw=0.4
                     )
 
         ax.set_xlabel("x [m]")
@@ -182,16 +180,18 @@ def main():
         ax.set_zlabel("z [m]")
 
         # Equal aspect (critical)
-        lims = np.array([
-            ax.get_xlim3d(),
-            ax.get_ylim3d(),
-            ax.get_zlim3d(),
-        ])
+        lims = np.array(
+            [
+                ax.get_xlim3d(),
+                ax.get_ylim3d(),
+                ax.get_zlim3d(),
+            ]
+        )
         center = lims.mean(axis=1)
         radius = (lims[:, 1] - lims[:, 0]).max() / 2
-        ax.set_xlim(center[0]-radius, center[0]+radius)
-        ax.set_ylim(center[1]-radius, center[1]+radius)
-        ax.set_zlim(center[2]-radius, center[2]+radius)
+        ax.set_xlim(center[0] - radius, center[0] + radius)
+        ax.set_ylim(center[1] - radius, center[1] + radius)
+        ax.set_zlim(center[2] - radius, center[2] + radius)
 
         n_muons_to_draw = 10
 
@@ -202,31 +202,35 @@ def main():
             voxels = all_muon_voxels[m]
 
             dynamic_artists = []
-            
-            x_line = [muon_above[0], detector_locations[muon_detectors[m]][0], muon_below[0]]
-            y_line = [muon_above[1], detector_locations[muon_detectors[m]][1], muon_below[1]]
-            z_line = [muon_above[2], detector_locations[muon_detectors[m]][2], muon_below[2]]
+
+            x_line = [
+                muon_above[0],
+                detector_locations[muon_detectors[m]][0],
+                muon_below[0],
+            ]
+            y_line = [
+                muon_above[1],
+                detector_locations[muon_detectors[m]][1],
+                muon_below[1],
+            ]
+            z_line = [
+                muon_above[2],
+                detector_locations[muon_detectors[m]][2],
+                muon_below[2],
+            ]
 
             # ---- draw ray ----
-            ray_line, = ax.plot(
-                x_line, y_line, z_line,
-                color="black", lw=2.5
-            )
+            (ray_line,) = ax.plot(x_line, y_line, z_line, color="black", lw=2.5)
             dynamic_artists.append(ray_line)
 
-            ax.set_title(f"Muon in detector {muon_detectors[m]}: $\\theta_{{reco}}={muons['theta_reco'].to_numpy()[m]:.1f}^{{\\circ}}, \\phi_{{reco}}={muons['phi_reco'].to_numpy()[m]:.1f}^{{\\circ}}$")
-
+            ax.set_title(
+                f"Muon in detector {muon_detectors[m]}: $\\theta_{{reco}}={muons['theta_reco'].to_numpy()[m]:.1f}^{{\\circ}}, \\phi_{{reco}}={muons['phi_reco'].to_numpy()[m]:.1f}^{{\\circ}}$"
+            )
 
             # ---- highlight hit voxels ----
             for v in voxels:
                 arts = draw_voxel_cube(
-                    ax,
-                    v,
-                    start,
-                    spacing,
-                    color="red",
-                    alpha=0.9,
-                    lw=2.0
+                    ax, v, start, spacing, color="red", alpha=0.9, lw=2.0
                 )
                 dynamic_artists.extend(arts)
 
@@ -238,8 +242,6 @@ def main():
             # ---- remove dynamic artists ----
             for art in dynamic_artists:
                 art.remove()
-
-
 
 
 if __name__ == "__main__":
