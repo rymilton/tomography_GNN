@@ -261,16 +261,16 @@ def main():
         torch.save(model.state_dict(), checkpoint_path)
         print(f"Saved checkpoint: {checkpoint_path}")
 
-        # --- Save final model ---
-        final_model_path = os.path.join(model_path, "final_model.pth")
-        torch.save(model.state_dict(), final_model_path)
-        print(f"Training complete. Final model saved to {final_model_path}")
+    # --- Save final model ---
+    final_model_path = os.path.join(model_path, "final_model.pth")
+    torch.save(model.state_dict(), final_model_path)
+    print(f"Training complete. Final model saved to {final_model_path}")
 
-        # --- Save loss history ---
-        loss_file = os.path.join(model_path, "training_losses.pt")
-        torch.save(all_epoch_metrics, loss_file)
-        print(f"Training losses saved to {loss_file}")
-        print(f"Training took {time.time() - training_time} s")
+    # --- Save loss history ---
+    loss_file = os.path.join(model_path, "training_losses.pt")
+    torch.save(all_epoch_metrics, loss_file)
+    print(f"Training losses saved to {loss_file}")
+    print(f"Training took {time.time() - training_time} s")
 
 
 if __name__ == "__main__":
