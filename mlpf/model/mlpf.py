@@ -262,6 +262,8 @@ class VoxelDensityHead(nn.Module):
         voxel_mask: (B, N_muons, N_voxels) -> zeros voxels not intersected by this muon
         """
         out = self.net(embedding)  # (B, N_muons, num_voxels)
+        out = torch.nn.functional.softplus(out)
+
 
         # Remove padded muons
         if muon_mask is not None:
@@ -270,7 +272,6 @@ class VoxelDensityHead(nn.Module):
         # Zero out voxels this muon doesn't pass through
         if voxel_mask is not None:
             out = out * voxel_mask
-
         return out
 
 
@@ -468,12 +469,17 @@ class MLPF(nn.Module):
         # rho_mu: (B, M, N)
 
         # ----- Apply voxel geometry -----
-        if voxel_mask is not None:
-            density_per_muon = density_per_muon * voxel_mask
         if path_length is not None:
             density_per_muon = density_per_muon * path_length
 
         density_total = density_per_muon.sum(dim=1)  # (B, N)
+        if path_length is not None:
+            normalizer = path_length.sum(dim=1) + 1e-8
+        else:
+            normalizer = muon_mask.sum(dim=1) + 1e-8
+        density_total = density_per_muon.sum(dim=1) / normalizer
+
+
         return density_total
 
 
