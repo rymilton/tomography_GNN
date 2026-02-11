@@ -1,12 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
 import argparse
 import pickle
 from raytrace.raytracers import raytrace
 import time
 import pandas as pd
+import yaml
+import os
 
 
 def parse_arguments():
@@ -43,10 +43,34 @@ def parse_arguments():
         help="Whether to draw plots of the muon rays and voxel intersections",
     )
     parser.add_argument(
+        "--plot_directory",
+        default="/home/ryan/tomography_GNN/siddon_plots/",
+        help="Directory to store plots in",
+        type=str,
+    )
+    parser.add_argument(
+        "--plot_file_string",
+        default="",
+        help="String to add to plot files",
+        type=str,
+    )
+    parser.add_argument(
         "--output_file",
         default="/home/ryan/tomography_GNN/target_merge_global_with_voxels.pkl",
         help="Output pickle file to save transformed global coordinates",
         type=str,
+    )
+    parser.add_argument(
+        "--config",
+        default="/home/ryan/tomography_GNN/scripts/data_config.yaml",
+        help="Path to data config file",
+        type=str,
+    )
+    parser.add_argument(
+        "--verbose",
+        default=False,
+        help="Enable print statements",
+        action="store_true",
     )
     return parser.parse_args()
 
@@ -89,10 +113,14 @@ def draw_voxel_cube(ax, idx, start, spacing, color="gray", alpha=0.1, lw=0.5):
 
     return artists
 
-
+# Run's Siddon algorithm based on the global muon positions calculated in transform_local_to_global
 def main():
     flags = parse_arguments()
 
+    if flags.verbose:
+        print("Opening config file:", flags.config)
+    data_options = yaml.safe_load(open(flags.config))
+    
     with open(flags.input_voxel_file, "rb") as f:
         vol = pickle.load(f)
     with open(flags.input_voxel_positions_file, "rb") as f:
@@ -111,11 +139,8 @@ def main():
         muons = pickle.load(f)
 
     muon_detectors = muons["detector"].to_numpy()
-    detector_locations = [
-        [0, 0, 0.5],
-        [-5, -5, 0.5],
-        [5, 5, 0.5],
-    ]
+    detector_locations_dict = data_options["DETECTOR_LOCATIONS"]
+
     max_num_muons = len(muons) if flags.num_muons is None else flags.num_muons
     print(f"Processing {max_num_muons} muons...")
     muons_initial = np.column_stack(
@@ -161,6 +186,8 @@ def main():
     print(f"Saved muon DataFrame with voxel info to {output_file}")
 
     if flags.draw_plots:
+        os.makedirs(flags.plot_directory, exist_ok=True)
+
         fig = plt.figure(figsize=(9, 9))
         ax = fig.add_subplot(111, projection="3d")
         start = voxel_start_pos
@@ -205,17 +232,17 @@ def main():
 
             x_line = [
                 muon_above[0],
-                detector_locations[muon_detectors[m]][0],
+                detector_locations_dict[muon_detectors[m]][0],
                 muon_below[0],
             ]
             y_line = [
                 muon_above[1],
-                detector_locations[muon_detectors[m]][1],
+                detector_locations_dict[muon_detectors[m]][1],
                 muon_below[1],
             ]
             z_line = [
                 muon_above[2],
-                detector_locations[muon_detectors[m]][2],
+                detector_locations_dict[muon_detectors[m]][2],
                 muon_below[2],
             ]
 
@@ -235,9 +262,10 @@ def main():
                 dynamic_artists.extend(arts)
 
             # ---- save figure ----
-            outname = f"muon_ray_{m:03d}.png"
-            plt.savefig(outname, dpi=150)
-            print(f"Saved {outname}")
+            outname = f"muon_ray_{m:03d}_{flags.plot_file_string}.png"
+            output_path = os.path.join(flags.plot_directory, outname)
+            plt.savefig(output_path, dpi=150)
+            print(f"Saved {output_path}")
 
             # ---- remove dynamic artists ----
             for art in dynamic_artists:
