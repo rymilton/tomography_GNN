@@ -14,13 +14,13 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import math, time, yaml, pickle, argparse
 from torch.utils.data import Dataset
+import pandas as pd
 
 
 # Class to read each row in the pandas dataframe and get the voxel densities
 class MuonDataset(Dataset):
-    def __init__(self, muon_dataframe, voxel_densities, feature_columns):
+    def __init__(self, muon_dataframe, feature_columns):
         self.df = muon_dataframe.reset_index(drop=True)
-        self.voxel_densities = torch.tensor(voxel_densities, dtype=torch.float)
         self.feature_columns = feature_columns
 
     def __len__(self):
@@ -37,88 +37,113 @@ class MuonDataset(Dataset):
         # Voxel indices and path lengths
         voxel_indices = torch.tensor(muon["voxel_indices_1d"], dtype=torch.long)
         path_lengths = torch.tensor(muon["lengths_in_voxels"], dtype=torch.float)
+        object_id = int(muon["object_ID"])
 
-        return features, voxel_indices, path_lengths
+        return features, voxel_indices, path_lengths, object_id
 
 
 # Function to group together a list of muons into groups of muons
 def muon_group_collate_fn(
-    batch, voxel_densities, num_voxels, device, num_muons_per_group
+    batch,
+    voxel_densities_object,
+    voxel_densities_noobject,
+    num_voxels,
+    device,
+    num_muons_per_group,
 ):
     """
     Groups a flat list of muons into groups of size num_muons_per_group
     """
-    features_list, voxel_indices_list, path_lengths_list = zip(*batch)
-    # Each batch is num_muons_per_group*num_groups_per_batch big
-    # It can have less though if there aren't enough muons in the dataset
-    total_number_of_muons = len(batch)
+    outputs = []
 
-    num_groups = max(1, math.ceil(total_number_of_muons / num_muons_per_group))
+    def process_subbatch(subbatch, voxel_densities):
+        if len(subbatch) == 0 or voxel_densities is None:
+            return None
 
-    total_batch_length = num_groups * num_muons_per_group
+        features_list, voxel_indices_list, path_lengths_list, _ = zip(*subbatch)
+        # features_list is a list of length 1418. Each entry is a tuple of 8 features
 
-    # Reshape features into [num_groups, num_muons_per_group, feature_dim]
-    # If there's less muons than num_muons_per_group then we will pad the muon features to num_muons_per_group
-    feature_dim = features_list[0].shape[0]
-    if total_number_of_muons < total_batch_length:
-        pad_feature = torch.zeros(feature_dim, dtype=features_list[0].dtype)
+        # Total number of muons in the subbatch
+        total_muons = len(subbatch)
+        num_groups = max(1, math.ceil(total_muons / num_muons_per_group))
+
+        # The number of muons that should be in the group if each group were full
+        total_batch_len = num_groups * num_muons_per_group
+        feature_dim = features_list[0].shape[0]
+
+        # Adding extra muons with all zeros to make each subbatch len total_batch_len
+        pad_feature = torch.zeros(feature_dim)
         features_list = list(features_list)
-        features_list.extend(
-            [pad_feature] * (total_batch_length - total_number_of_muons)
+        features_list.extend([pad_feature] * (total_batch_len - total_muons))
+
+        X = (
+            torch.stack(features_list)
+            .view(num_groups, num_muons_per_group, feature_dim)
+            .to(device)
         )
-    X = (
-        torch.stack(features_list)
-        .view(num_groups, num_muons_per_group, feature_dim)
-        .to(device)
-    )
 
-    # Making mask to determine the padded muons
-    muon_mask = torch.zeros(total_batch_length, dtype=torch.bool, device=device)
-    muon_mask[:total_number_of_muons] = True
-    muon_mask = torch.reshape(muon_mask, (num_groups, num_muons_per_group))
+        muon_mask = torch.zeros(total_batch_len, dtype=torch.bool, device=device)
+        muon_mask[:total_muons] = True
+        muon_mask = muon_mask.view(num_groups, num_muons_per_group)
 
-    # Initializing voxel mask and path lengths
-    voxel_mask = torch.zeros(
-        num_groups, num_muons_per_group, num_voxels, dtype=torch.bool, device=device
-    )
-    path_length = torch.zeros(
-        num_groups, num_muons_per_group, num_voxels, dtype=torch.float, device=device
-    )
+        voxel_mask = torch.zeros(
+            num_groups, num_muons_per_group, num_voxels, dtype=torch.bool, device=device
+        )
+        path_length = torch.zeros(
+            num_groups,
+            num_muons_per_group,
+            num_voxels,
+            dtype=torch.float,
+            device=device,
+        )
 
-    # Populating voxel mask and path length tensors
-    for g in range(num_groups):
-        for m in range(num_muons_per_group):
-            i = g * num_muons_per_group + m
-            if i >= total_number_of_muons:
-                break
-            vox_inds = voxel_indices_list[i]
-            lengths = path_lengths_list[i]
-            voxel_mask[g, m, vox_inds] = True
-            path_length[g, m, vox_inds] = lengths.to(device)
+        for g in range(num_groups):
+            for m in range(num_muons_per_group):
+                i = g * num_muons_per_group + m
+                if i >= total_muons:
+                    break
+                vox = voxel_indices_list[i]
+                lengths = path_lengths_list[i]
+                voxel_mask[g, m, vox] = True
+                path_length[g, m, vox] = lengths.to(device)
 
-    # Each group of muons will have the same training target
-    y = torch.stack(
-        [
-            torch.tensor(voxel_densities, dtype=torch.float, device=device)
-            for _ in range(num_groups)
-        ]
-    )
+        y = torch.stack([torch.tensor(voxel_densities, device=device)] * num_groups)
 
-    return X, y, muon_mask, voxel_mask, path_length
+        return X, y, muon_mask, voxel_mask, path_length
+
+    # --- Always process object muons ---
+    batch_object = [b for b in batch if b[3] == 1]
+    # process_subpatch returns a tuple of muon features, true densities, muon mask, voxel mask, path length
+    out_obj = process_subbatch(batch_object, voxel_densities_object)
+    if out_obj is not None:
+        outputs.append(out_obj)
+
+    batch_noobject = [b for b in batch if b[3] == 0]
+    out_noobj = process_subbatch(batch_noobject, voxel_densities_noobject)
+    if out_noobj is not None:
+        outputs.append(out_noobj)
+
+    return outputs
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--input_data_file",
+        "--input_object_file",
         default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
-        help="Input pickle file with with reconstructed theta, phi angles, and the voxel interesections",
+        help="Input pickle file with object and reconstructed theta, phi angles, and the voxel interesections",
+        type=str,
+    )
+    parser.add_argument(
+        "--input_free_file",
+        default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
+        help="Input pickle file without object and reconstructed theta, phi angles, and the voxel interesections",
         type=str,
     )
     parser.add_argument(
         "--config",
-        default="/home/ryan/tomography_GNN/scripts/tomography_config.yaml",
+        default="/home/ryan/tomography_GNN/scripts/training_config.yaml",
         help="Path of config file",
         type=str,
     )
@@ -127,6 +152,12 @@ def parse_arguments():
         default=None,
         help="Number of muons to use during training",
         type=int,
+    )
+    parser.add_argument(
+        "--free_and_object",
+        default=False,
+        help="Enable if you want to use both data with object and without object",
+        action="store_true",
     )
     return parser.parse_args()
 
@@ -145,19 +176,56 @@ def main():
     num_muons_per_group = config.get("NUM_MUONS_PER_GROUP", 64)
 
     # Open input data file
-    with open(flags.input_data_file, "rb") as f:
-        data = pickle.load(f)
-    print(f"Have {len(data['dataframe'])} number of events!")
+    with open(flags.input_object_file, "rb") as f:
+        object_data = pickle.load(f)
 
-    max_num_muons = (
-        flags.num_muons if flags.num_muons is not None else len(data["dataframe"])
-    )
-    muon_dataframe, voxel_densities = (
-        data["dataframe"][:max_num_muons],
-        data["voxel_densities"],
-    )
+    if flags.free_and_object:
 
-    dataset = MuonDataset(muon_dataframe, voxel_densities, muon_feature_names)
+        with open(flags.input_free_file, "rb") as f:
+            free_data = pickle.load(f)
+
+        # Balancing free and object events
+        free_df = free_data["dataframe"]
+        object_df = object_data["dataframe"]
+
+        # Find the minimum count
+        min_count = min(len(free_df), len(object_df))
+
+        # Sample that many from each class
+        free_df_balanced = free_df.sample(n=min_count, random_state=42)
+        object_df_balanced = object_df.sample(n=min_count, random_state=42)
+
+        # Combine them back into one DataFrame
+        muon_dataframe_balanced = pd.concat(
+            [free_df_balanced, object_df_balanced], ignore_index=True
+        )
+
+        max_num_muons = (
+            flags.num_muons
+            if flags.num_muons is not None
+            else len(muon_dataframe_balanced)
+        )
+
+        # Shuffle rows so it's not ordered by object_id
+        muon_dataframe = muon_dataframe_balanced.sample(
+            frac=1, random_state=42, ignore_index=True
+        )[:max_num_muons]
+
+        voxel_densities_object = object_data["voxel_densities"]
+        voxel_densities_noobject = free_data["voxel_densities"]
+    else:
+        max_num_muons = (
+            flags.num_muons
+            if flags.num_muons is not None
+            else len(object_data["dataframe"])
+        )
+        muon_dataframe = object_data["dataframe"][:max_num_muons]
+        voxel_densities_object = object_data["voxel_densities"]
+        voxel_densities_noobject = None
+
+    # max_val = muon_dataframe_balanced["voxel_indices_1d"].apply(max).max()
+    dataset = MuonDataset(muon_dataframe, muon_feature_names)
+    print(f"Have {len(muon_dataframe)} number of events!")
 
     # In each batch, we will have multiple groups of muons
     # Each group of muons will be formed into a graph
@@ -180,7 +248,8 @@ def main():
         shuffle=True,
         collate_fn=lambda b: muon_group_collate_fn(
             b,
-            voxel_densities,
+            voxel_densities_object,
+            voxel_densities_noobject=voxel_densities_noobject,
             num_voxels=MAX_NUMBER_OF_VOXELS,
             device=device,
             num_muons_per_group=num_muons_per_group,
@@ -192,14 +261,15 @@ def main():
         shuffle=True,
         collate_fn=lambda b: muon_group_collate_fn(
             b,
-            voxel_densities,
+            voxel_densities_object,
+            voxel_densities_noobject=voxel_densities_noobject,
             num_voxels=MAX_NUMBER_OF_VOXELS,
             device=device,
             num_muons_per_group=num_muons_per_group,
         ),
     )
 
-    MAX_NUMBER_OF_VOXELS = len(voxel_densities)
+    MAX_NUMBER_OF_VOXELS = len(voxel_densities_object)
 
     # small model config for quick runs
     model = MLPF(
@@ -224,24 +294,36 @@ def main():
 
         model.train()
         train_loss = 0.0
-        for X, y, muon_mask, voxel_mask, path_length in dataloader_train:
+        for batch_outputs in dataloader_train:
             optimizer.zero_grad()
-            y_pred = model(X, muon_mask, voxel_mask, path_length)
-            # Getting a mask to ignore the voxels that are never intersected by a muon
-            voxel_mask_event = voxel_mask.any(dim=1)  # [B, V]
-            train_loss_per_batch = mlpf_loss(y_pred, y, voxel_mask_event)
+
+            train_loss_per_batch = 0.0
+
+            # batch_outputs is a LIST of (X, y, muon_mask, voxel_mask, path_length)
+            for X, y, muon_mask, voxel_mask, path_length in batch_outputs:
+                y_pred = model(X, muon_mask, voxel_mask, path_length)
+
+                # Checking if each voxel has at least one muonpassing through it
+                voxel_mask_event = voxel_mask.any(dim=1)  # [B, V]
+                train_loss_per_batch += mlpf_loss(y_pred, y, voxel_mask_event)
             train_loss_per_batch.backward()
             optimizer.step()
+
             train_loss += train_loss_per_batch.item()
+
         avg_train_loss = train_loss / len(dataloader_train)
 
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for X, y, muon_mask, voxel_mask, path_length in dataloader_validation:
-                y_pred = model(X, muon_mask, voxel_mask, path_length)
-                voxel_mask_event = voxel_mask.any(dim=1)
-                val_loss_per_batch = mlpf_loss(y_pred, y, voxel_mask_event)
+            for batch_outputs in dataloader_validation:
+                val_loss_per_batch = 0.0
+
+                for X, y, muon_mask, voxel_mask, path_length in batch_outputs:
+                    y_pred = model(X, muon_mask, voxel_mask, path_length)
+                    voxel_mask_event = voxel_mask.any(dim=1)
+                    val_loss_per_batch += mlpf_loss(y_pred, y, voxel_mask_event)
+
                 val_loss += val_loss_per_batch.item()
 
         avg_val_loss = val_loss / len(dataloader_validation)
