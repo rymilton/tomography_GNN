@@ -13,3 +13,7 @@ DETECTOR_ROTATIONS:
 # Z locations above and below the voxels which denote the start and end of muon path
 Z_ABOVE_COORDINATE: 20
 Z_BELOW_COORDINATE: -20
+
+# Split the data into train/test with fraction (1-TEST_FRACTION)/TEST_FRACTION during preprocessing
+TRAIN_TEST_SPLIT: True
+TEST_FRACTION: 0.25
