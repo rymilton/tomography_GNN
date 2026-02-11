@@ -7,10 +7,10 @@ MUON_FEATURES:
   - x_global_below
   - y_global_below
   - z_global_below
-NUM_EPOCHS: 100
+NUM_EPOCHS: 1
 LEARNING_RATE: 1e-3
 NUM_MUON_GROUPS_PER_BATCH: 64
 NUM_MUONS_PER_GROUP: 64
 VALIDATION_SPLIT: 0.2
 MODEL_SAVE_DIRECTORY: "/home/ryan/tomography_GNN/tomography_models/"
-MODEL_NAME: "tomography_MLPF"
+MODEL_NAME: "testing_training"
