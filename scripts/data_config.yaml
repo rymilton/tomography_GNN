@@ -1,0 +1,15 @@
+# Detector names to (x, y, z) locations in meters in global coordinates
+DETECTOR_LOCATIONS:
+  0: [0, 0, 0.5]
+  1: [-5, -5, 0.5]
+  2: [5, 5, 0.5]
+
+# Detector names to (alpha, beta, psi) Euler angles
+DETECTOR_ROTATIONS:
+  0: [0, 0, 0]
+  1: [0, 0, 0]
+  2: [0, 0, 0]
+
+# Z locations above and below the voxels which denote the start and end of muon path
+Z_ABOVE_COORDINATE: 20
+Z_BELOW_COORDINATE: -20

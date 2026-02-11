@@ -2,13 +2,13 @@ import numpy as np
 import pickle
 import pandas as pd
 import argparse
-
+import yaml
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--input_file",
+        "--input_muon_file",
         default="/home/ryan/tomography_GNN/target_merge.pkl",
         help="Input pickle file with with reconstructed local theta, phi angles",
         type=str,
@@ -18,6 +18,18 @@ def parse_arguments():
         default="/home/ryan/tomography_GNN/target_merge_global.pkl",
         help="Output pickle file to save transformed global coordinates",
         type=str,
+    )
+    parser.add_argument(
+        "--config",
+        default="/home/ryan/tomography_GNN/scripts/data_config.yaml",
+        help="Path to data config file",
+        type=str,
+    )
+    parser.add_argument(
+        "--verbose",
+        default=False,
+        help="Enable print statements",
+        action="store_true",
     )
     return parser.parse_args()
 
@@ -101,38 +113,37 @@ def xy_theta_phi_at_height_in_global(
     return x_global, y_global, theta_global, phi_global
 
 
+# Procedure to take in the local muon theta + phi and convert to global coordinates
 def main():
 
     flags = parse_arguments()
-    # Detector locations in global frame in meters
-    detector_locations = [[0, 0, 0.5], [-5, -5, 0.5], [5, 5, 0.5]]
-    # Detector pitch, yaw, roll in radians
-    detector_alpha_beta_psi = [(0, 0, 0), (0, 0, 0), (0, 0, 0)]
 
-    desired_z_location_above = (
-        20  # The top of the geometry is 20 meters. We will get x,y at this z height.
-    )
-    desired_z_location_below = -20
+    if flags.verbose:
+        print("Opening config file:", flags.config)
+    data_options = yaml.safe_load(open(flags.config))
+
+    detector_locations_dict = data_options["DETECTOR_LOCATIONS"]
+    detector_rotations_dict = data_options["DETECTOR_ROTATIONS"]
+
+    desired_z_location_above = data_options["Z_ABOVE_COORDINATE"]
+    desired_z_location_below = data_options["Z_BELOW_COORDINATE"]
 
     # Open pickle file and load data
-
-    with open(flags.input_file, "rb") as f:
+    if flags.verbose:
+        print("Opening input muon pickle file:", flags.input_muon_file)
+    with open(flags.input_muon_file, "rb") as f:
         detector_data = pickle.load(f)
-
     df = pd.DataFrame(detector_data)
     df = df.query("theta_reco != 90").copy()
 
     for index, row in df.iterrows():
         detector_id = int(row["detector"])
 
-        # Jay said that the theta = 90 degree events are invalid, so we skip them.
-        if row["theta_reco"] == 90:
-            continue
         theta_local = np.deg2rad(row["theta_reco"])
         phi_local = np.deg2rad(row["phi_reco"])
 
-        origin_local_in_global = detector_locations[detector_id]
-        alpha, beta, psi = detector_alpha_beta_psi[detector_id]
+        origin_local_in_global = detector_locations_dict[detector_id]
+        alpha, beta, psi = detector_rotations_dict[detector_id]
 
         R_local_to_global = rotation_matrix_local_to_global(alpha, beta, psi)
 
@@ -166,26 +177,6 @@ def main():
         df.at[index, "z_global_below"] = desired_z_location_below
         df.at[index, "theta_global"] = np.rad2deg(theta_global)
         df.at[index, "phi_global"] = np.rad2deg(phi_global)
-
-        # Print the first 10 entries for verification
-        if index < 10:
-            print(f"Detector ID: {detector_id}")
-            print(
-                f"Global Coordinates at z={desired_z_location_above} m: x = {x_global_above:.2f} m, y = {y_global_above:.2f} m"
-            )
-            print(
-                f"Global Coordinates at z={desired_z_location_below} m: x = {x_global_below:.2f} m, y = {y_global_below:.2f} m"
-            )
-            print(
-                f"Global coordinates at detector: x0 = {origin_local_in_global[0]:.2f} m, y0 = {origin_local_in_global[1]:.2f} m, z0 = {origin_local_in_global[2]:.2f} m"
-            )
-            print(
-                f"Global Angles: theta = {np.rad2deg(theta_global):.2f} deg, phi = {np.rad2deg(phi_global):.2f} deg"
-            )
-            print(
-                f"Local Angles: theta = {np.rad2deg(theta_local):.2f} deg, phi = {np.rad2deg(phi_local):.2f} deg"
-            )
-            print("-----")
     df.to_pickle(flags.output_file)
 
 
