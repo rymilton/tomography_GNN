@@ -5,35 +5,35 @@
 
 # Input muon files
 INPUT_MUON_FILES=(
-    "/home/ryan/tomography_GNN/target_merge.pkl"
-    "/home/ryan/tomography_GNN/free_merge.pkl"
+    "/home/ryan/tomography_GNN/input_files/target_merge.pkl"
+    "/home/ryan/tomography_GNN/input_files/free_merge.pkl"
 )
 
 # Corresponding voxel densities
 INPUT_VOXEL_FILES=(
-    "/home/ryan/tomography_GNN/soil_target_voxels_5x5.pkl"
-    "/home/ryan/tomography_GNN/soil_target_voxels_5x5.pkl"
+    "/home/ryan/tomography_GNN/input_files/soil_target_voxels_5x5.pkl"
+    "/home/ryan/tomography_GNN/input_files/soil_target_voxels_5x5.pkl"
 )
 
 # Corresponding voxel coordinates
 INPUT_VOXEL_COORDINATES_FILES=(
-    "/home/ryan/tomography_GNN/soil_target_voxel_coords_5x5.pkl"
-    "/home/ryan/tomography_GNN/soil_target_voxel_coords_5x5.pkl"
+    "/home/ryan/tomography_GNN/input_files/soil_target_voxel_coords_5x5.pkl"
+    "/home/ryan/tomography_GNN/input_files/soil_target_voxel_coords_5x5.pkl"
 )
 
 # Whether the object is present in each sample
 OBJECT_PRESENT=(True False)
 
 # Save intermediate files generated during global transformation and Siddon's algoritm(True/False)
-SAVE_INTERMEDIATE_FILES=True
+SAVE_INTERMEDIATE_FILES=False
 
 # Data configuration file
 DATA_CONFIG_FILE="/home/ryan/tomography_GNN/scripts/data_config.yaml"
 
 # Output muon files
 OUTPUT_MUON_FILES=(
-    "/home/ryan/tomography_GNN/target_merge_preprocessed.pkl"
-    "/home/ryan/tomography_GNN/free_merge_preprocessed.pkl"
+    "/home/ryan/tomography_GNN/preprocessed_data/target_merge_preprocessed.pkl"
+    "/home/ryan/tomography_GNN/preprocessed_data/free_merge_preprocessed.pkl"
 )
 
 # Scripts directory
@@ -60,6 +60,10 @@ for i in "${!INPUT_MUON_FILES[@]}"; do
     coord_file="${INPUT_VOXEL_COORDINATES_FILES[$i]}"
     object_present="${OBJECT_PRESENT[$i]}"
 
+    printf "Input data file: ${muon_file}\n"
+    printf "Input voxel density file: ${voxel_file}\n"
+    printf "Input voxel coordinates file: ${coord_file}\n\n"
+    
     # -------------------------
     # Convert local to global coordinates
     # -------------------------
