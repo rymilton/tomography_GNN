@@ -33,7 +33,7 @@ pip install -r requirements.txt
 #### Installation
 To install the raytracing repository, you need to do the following: `cd raytrace & pip install . & cd ..`
 
-### Scripts for preparing data
+## Scripts for preparing data
 As mentioned in the Overview section, there are four steps to preparing the data for training. There are different scripts to do these steps, all contained in `scripts`. The `prepare_data.sh` script carries out all of the steps in one convenient script. It is highly recommended to use this script.
 
 Below, each set of steps is covered in detail:
@@ -54,3 +54,15 @@ Now that we have the intial and final positions of the muons, we can run them th
 Finally, the input features of the data is re-scaled to be in the range [0,1] using the script `scripts/preprocess_data.py`. This script can also split files into train/test. To enable this, set `TRAIN_TEST_SPLIT: True` and set the `TEST_FRACTION` in `scripts/data_config.yaml`. This script adds the voxel densities to the final .pkl file, so the voxel file is needed as input with the `--input_voxel_densities_file` flag. If you're working with a case with no object, use the `--no_object` flag to set the densities of all the voxels to 0. The shape of the voxels will be the same as the voxels in `--input_voxel_densities_file`. Note an object ID will be added to the data, with 0 representing no object and 1 being an object is present.
 
 The files from `scripts/preprocess_data.py` are the final files you'll need to train the model. Again, it's recommended to use the `scripts/prepare_data.sh` script to run all of these scripts for you.
+
+## Training, Inference, and Analysis
+To train a model, you can use `scripts/train_tomography.py`. Some parameters for training are in `training_config.yaml`. The flags `--input_object_file` and `--input_free_file` should be the paths to the preprocessed files with and without objects, respectively. If you want the training to include the free case (no object), use the `--free_and_object` flag. The case with the object is the default case.
+
+The `NUM_MUON_GROUPS_PER_BATCH` and `NUM_MUONS_PER_GROUP` in the `training_config.yaml` file are a little tricky. The model will form `NUM_MUON_GROUPS_PER_BATCH` graphs per batch. Each graph will have `NUM_MUONS_PER_GROUP` muons in it.
+
+After training, inference can be run with `scripts/inference_tomography.py`. The flags are the same as the training script. Since there is only 1 or 2 configurations the model is trying to predict (with or without object), the predictions from multiple batches will correspond to the same configuration. To handle this, the predictions are averaged over batches. For instance, if 64 batches of density predictions correspond to one set of voxels, then the predictions for voxel i are averaged over all the batches.
+
+Once inference is done, you can look at the model results. An example analysis script is `scripts/tomography_model_results.py`. Some output from that script is below:
+
+<img width="450" height="375" alt="image (14)" src="https://github.com/user-attachments/assets/8281c689-5657-4281-91ed-0d40fb5b60f3" />
+<img width="450" height="375" alt="image (15)" src="https://github.com/user-attachments/assets/bb2f8e77-eb0f-4fcf-aae9-352d2a4a63a5" />
