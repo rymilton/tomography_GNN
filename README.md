@@ -10,3 +10,25 @@ We use MLPF to take in simulated muons passing through a voxel grid of varying d
 MLPF then forms a graph of a group of muons, and for each muon node, outputs a set of density predictions for each voxel that the muon passes through. This number is multiplied by the path length of the muon in that voxel. If a voxel has multiple muons passing through it, the contributions from each muon (model prediction*path length) are summed. The training label is the true densities of all the voxels that received hits. The data can include geometries with and without objects present.
 
 During inference, the model predictions per voxels are averaged across all batches.
+## Setting up + environment
+### Cloning
+To clone this repository, use `git clone --recurse-submodules https://github.com/rymilton/tomography_GNN.git`. You need the `--recurse-submodules` to get the raytrace repository.
+
+### Environment
+#### CUDA
+CUDA is needed to install this software. CUDA needs to be in your PATH and LD_LIBRARY_PATH variables. To do this for example on the UCR GPU machine, you can add the following to your ~/.bashrc:
+```
+export PATH=$PATH:/usr/local/cuda-11.8/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.8/lib64
+```
+
+#### Python environment
+To set up your Python virtual environment simply do the following after cloning the repository:
+```
+python3 -m venv tomography_GNN_venv
+source tomography_GNN_venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### Installation
+To install the raytracing repository, you need to do the following: `cd raytrace & pip install . & cd ..`
