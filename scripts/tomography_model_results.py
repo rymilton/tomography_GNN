@@ -17,7 +17,7 @@ def parse_arguments():
 
     parser.add_argument(
         "--model_path",
-        default="/home/ryan/tomography_GNN/tomography_models/tomography_MLPF_5x5_noobjectID_balanced/",
+        default="/home/ryan/tomography_GNN/tomography_models/testing_training/",
         help="Directory containing the trained model",
         type=str,
     )
@@ -35,7 +35,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--plot_directory",
-        default="/home/ryan/tomography_GNN/tomography_models/tomography_MLPF_5x5_noobjectID_balanced/plots/",
+        default="/home/ryan/tomography_GNN/tomography_models/testing_training/plots/",
         help="Directory to store the plots",
         type=str,
     )
@@ -60,7 +60,6 @@ def main():
     )
     density_predictions_noobject = model_predictions["voxel_predictions"][0]
     density_predictions_object = model_predictions["voxel_predictions"][1]
-    print(density_predictions_object)
     density_true_noobject = model_predictions["voxel_true_densities"][0]
     density_true_object = model_predictions["voxel_true_densities"][1]
 
@@ -100,7 +99,6 @@ def main():
     density_true_noobject = density_true_noobject
     pred_densities_noobject_flat = pred_densities_noobject_flat[mask_valid_noobject]
 
-    # mask_valid_object = (pred_densities_object_flat >= 0)
     mask_valid_object = pred_densities_object_flat >= 0
     voxel_positions_object_flat = voxel_positions_flat
     density_true_object = density_true_object
