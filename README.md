@@ -31,7 +31,12 @@ pip install -r requirements.txt
 ```
 
 #### Installation
-To install the raytracing repository, you need to do the following: `cd raytrace & pip install . & cd ..`
+To install the raytracing repository, you need to do the following: 
+```
+cd raytrace
+pip install .
+cd ..
+```
 
 ## Scripts for preparing data
 As mentioned in the Overview section, there are four steps to preparing the data for training. There are different scripts to do these steps, all contained in `scripts`. The `prepare_data.sh` script carries out all of the steps in one convenient script. It is highly recommended to use this script.
