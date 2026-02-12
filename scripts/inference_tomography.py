@@ -119,13 +119,13 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input_object_file",
-        default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
+        default="/home/ryan/tomography_GNN/preprocessed_data_test.pkl",
         help="Input pickle file with object and reconstructed theta, phi angles, and the voxel interesections",
         type=str,
     )
     parser.add_argument(
         "--input_free_file",
-        default="/home/ryan/tomography_GNN/preprocessed_data_train.pkl",
+        default="/home/ryan/tomography_GNN/preprocessed_data_test.pkl",
         help="Input pickle file without object and reconstructed theta, phi angles, and the voxel interesections",
         type=str,
     )
@@ -183,7 +183,7 @@ def main():
         muon_dataframe = muon_dataframe.sample(
             frac=1, random_state=42, ignore_index=True
         )[:max_num_muons]
-        voxel_densities_noobject = data["voxel_densities"]
+        voxel_densities_noobject = free_data["voxel_densities"]
         voxel_densities_dict[0] = voxel_densities_noobject
     else:
         muon_dataframe = object_df
@@ -224,7 +224,7 @@ def main():
         conv_type="gnn_lsh",
     ).to(device)
     model.load_state_dict(
-        torch.load(model_path + "/checkpoints/model_epoch24.pth", map_location=device)
+        torch.load(model_path + "/final_model.pth", map_location=device)
     )
     model.eval()
 
